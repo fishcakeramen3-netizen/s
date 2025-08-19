@@ -1,0 +1,657 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta http-equiv="Content-Security-Policy"
+      content="default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: https://*.firebaseio.com https://*.googleapis.com https://*.gstatic.com https://www.googleapis.com;">
+
+  <title>mspaintspace · Scribblebound</title>
+  <style>
+    :root {
+      --bg: #0f1115;
+      --panel: #151923;
+      --muted: #7f8ba3;
+      --text: #e6ecff;
+      --accent: #7c9cff;
+      --shadow: 0 10px 30px rgba(0,0,0,.4);
+    }
+    html, body { margin:0; height:100%; background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, sans-serif; overflow:hidden; }
+
+    .app { display:grid; grid-template-columns: 1fr 360px; grid-template-rows: auto 1fr; grid-template-areas:
+      "toolbar toolbar"
+      "world chat"; height:100%; gap:10px; padding:10px; }
+
+    /* === INTRO/SETUP OVERLAY === */
+    .overlay { position:fixed; inset:0; background:rgba(0,0,0,0.45); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); display:flex; justify-content:center; align-items:center; z-index:9999; transition: opacity .4s ease; }
+    .overlay.hidden { opacity:0; pointer-events:none; backdrop-filter:none; }
+    .rules-box { background:#151923; border:1px solid #1e2433; padding:24px; border-radius:16px; width:min(720px,92vw); text-align:left; box-shadow:var(--shadow); }
+    .rules-box h1 { margin:0 0 6px; font-size:22px; }
+    .rules-box h2 { margin:14px 0 8px; font-size:14px; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; }
+    .rules-box p { margin:6px 0 10px; color:var(--muted); }
+    .motto { background:#0e121b; border:1px solid #1e2433; padding:10px 12px; border-radius:10px; margin:8px 0 14px; }
+    .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+    .rules-box ul { list-style:none; padding:0; margin:0; }
+    .rules-box li { background:#0e121b; margin:6px 0; padding:8px 10px; border-radius:10px; border:1px solid #1e2433; }
+    .setup-fields { margin-top:10px; display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+    .setup-fields label { display:flex; gap:8px; align-items:center; background:#0e121b; border:1px solid #1e2433; padding:8px 10px; border-radius:10px; }
+    .setup-fields input[type="text"], .setup-fields input[type="color"] { background:transparent; border:none; outline:none; color:var(--text); width:100%; }
+    .minor { font-size:12px; color:var(--muted); }
+    .rules-box footer { display:flex; gap:10px; align-items:center; margin-top:14px; }
+    .rules-box footer label { display:flex; align-items:center; gap:8px; }
+    .rules-box button.primary { margin-left:auto; background:var(--accent); color:#0a0c12; border:none; border-radius:12px; padding:12px 16px; font-weight:bold; cursor:pointer; box-shadow:var(--shadow); opacity:.3; transition:opacity .2s ease, transform .05s ease; }
+    .rules-box button.primary.ready { opacity:1; }
+    .rules-box button.primary:active { transform: translateY(1px); }
+
+    /* === TOOLBAR / LAYOUT === */
+    .toolbar { grid-area: toolbar; display:flex; align-items:center; gap:10px; background: var(--panel); border:1px solid #222738; border-radius:16px; padding:10px; box-shadow:var(--shadow); }
+    .toolbar .group { display:flex; gap:8px; align-items:center; background:#0e121b; padding:6px 8px; border-radius:12px; border:1px solid #1e2433; }
+    .toolbar input[type="color"], .toolbar input[type="number"], .toolbar input[type="text"], .toolbar input[type="range"], .toolbar select { background:transparent; border:none; outline:none; color:var(--text); }
+    .toolbar button { background:#0e121b; border:1px solid #1e2433; color:var(--text); padding:6px 10px; border-radius:10px; cursor:pointer; }
+    .toolbar button:hover { border-color:var(--accent); }
+    .spacer{flex:1;}
+    .motto-ticker{ color:var(--muted); font-size:12px; }
+
+    .world-wrap { grid-area:world; position:relative; background:#0a0c12; border:1px solid #1b2030; border-radius:16px; overflow:hidden; box-shadow:var(--shadow); }
+    canvas#world { position:absolute; left:50%; top:50%; transform-origin:0 0; background:#fff; image-rendering: crisp-edges; }
+    .crosshair { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:14px; height:14px; border:2px solid rgba(124,156,255,.7); border-radius:50%; pointer-events:none; box-shadow:0 0 0 2px rgba(124,156,255,.15); }
+    .coords { position:absolute; left:12px; bottom:12px; font-size:12px; color:var(--muted); background:rgba(0,0,0,.35); padding:6px 8px; border-radius:8px; }
+
+    .chat { grid-area:chat; display:flex; flex-direction:column; background:var(--panel); border:1px solid #222738; border-radius:16px; overflow:hidden; box-shadow:var(--shadow); }
+    .chat header { padding:10px; border-bottom:1px solid #1e2433; color:var(--muted); display:flex; gap:8px; align-items:center; }
+    .chat-log { flex:1; overflow-y:auto; padding:12px; display:flex; flex-direction:column; gap:8px; }
+    .chat-msg { background:#0e121b; border:1px solid #1e2433; border-radius:12px; padding:8px 10px; }
+    .chat-msg small { color:var(--muted); display:block; margin-bottom:2px; }
+    .chat-msg em { opacity:.95; }
+    .chat form { display:flex; gap:8px; padding:10px; border-top:1px solid #1e2433; }
+    .chat input[type="text"] { flex:1; background:#0e121b; border:1px solid #1e2433; color:var(--text); border-radius:10px; padding:10px; }
+    .chat button { background:var(--accent); border:none; color:#0a0c12; border-radius:10px; padding:10px 12px; cursor:pointer; font-weight:600; }
+
+    .toast { position:fixed; left:50%; bottom:16px; transform:translateX(-50%); background:#0e121b; border:1px solid #1e2433; padding:10px 14px; border-radius:10px; box-shadow:var(--shadow); color:var(--text); }
+
+    /* === SETTINGS MODAL === */
+    .modal { position:fixed; inset:0; display:none; align-items:center; justify-content:center; z-index:9998; }
+    .modal.active { display:flex; }
+    .modal .sheet { width:min(560px,92vw); background:#151923; border:1px solid #1e2433; border-radius:16px; box-shadow:var(--shadow); padding:16px; }
+    .sheet h3 { margin:0 0 10px; }
+    .sheet .row { display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin:8px 0; }
+    .sheet label { display:flex; gap:8px; align-items:center; background:#0e121b; border:1px solid #1e2433; padding:8px 10px; border-radius:10px; }
+    .sheet input[type="text"], .sheet input[type="color"] { background:transparent; border:none; outline:none; color:var(--text); width:100%; }
+    .sheet footer { display:flex; gap:8px; margin-top:10px; }
+    .btn-secondary { background:#0e121b; border:1px solid #1e2433; color:var(--text); border-radius:10px; padding:8px 12px; cursor:pointer; }
+    .btn-primary { background:var(--accent); border:none; color:#0a0c12; border-radius:10px; padding:8px 12px; cursor:pointer; font-weight:700; margin-left:auto; }
+  </style>
+</head>
+<body>
+  <!-- overlay with setup + rules -->
+  <div class="overlay" id="overlay">
+    <div class="rules-box" id="rulesBox">
+      <h1>hi, welcome to <strong>scribblebound</strong>!</h1>
+      <p>an anonymous oekaki + chat corner. motto time: <em>love makes the world go around</em>. 💖 love love love looove!</p>
+      <div class="motto">Be kind, draw kind — we’re here to have fun and make little guys.</div>
+
+      <div class="grid2">
+        <div>
+          <h2>chat rules</h2>
+          <ul>
+            <li><strong>be cool, be kind.</strong> café vibes. no targeted insults or dogpiling.</li>
+            <li><strong>no hate / harassment.</strong> bigotry, slurs, threats = ban.</li>
+            <li><strong>keep it readable.</strong> no spam/flooding or walls of noise.</li>
+            <li><strong>sfw only.</strong> no sexual content. no porn. keep it comfy.</li>
+          </ul>
+        </div>
+        <div>
+          <h2>drawing rules</h2>
+          <ul>
+            <li><strong>respect the canvas.</strong> don’t erase or scribble over art without consent.</li>
+            <li><strong>no theft.</strong> draw your own. no tracing/stealing.</li>
+            <li><strong>no hateful/explicit imagery.</strong> light cartoony gore ok; nothing graphic.</li>
+            <li><strong>collab kindly.</strong> ask before editing others’ pieces.</li>
+          </ul>
+        </div>
+      </div>
+
+      <h2>let’s get setup</h2>
+      <div class="setup-fields">
+        <label title="display name (max 24)">name
+          <input id="setupName" type="text" maxlength="24" placeholder="leave blank for anonymous"/>
+        </label>
+        <label title="optional pronouns shown next to name">pronouns
+          <input id="setupPronouns" type="text" maxlength="24" placeholder="e.g. she/they"/>
+        </label>
+        <label title="chat text color">text color
+          <input id="setupTextColor" type="color" value="#e6ecff"/>
+        </label>
+        <label title="username label color">username color
+          <input id="setupNameColor" type="color" value="#7c9cff"/>
+        </label>
+      </div>
+      <p class="minor">Tip: you can change these anytime in <strong>Settings</strong>. We save them locally so they’re here each time you come back.</p>
+
+      <footer>
+        <label><input type="checkbox" id="agree"> I promise to follow the rules.</label>
+        <button class="primary" id="enterBtn">Enter</button>
+      </footer>
+    </div>
+  </div>
+
+  <div class="app" style="display:none" id="mainApp">
+    <div class="toolbar">
+      <div class="group">
+        <span>color</span>
+        <input id="color" type="color" value="#7c9cff"/>
+        <span>size</span>
+        <input id="size" type="number" min="1" max="60" value="6"/>
+        <span>opacity</span>
+        <input id="alpha" type="range" min="0.1" max="1" step="0.05" value="1" title="brush opacity"/>
+      </div>
+
+      <div class="group">
+        <span>center to</span>
+        <input id="coordX" type="number" step="1" value="0" style="width:100px" placeholder="x"/>
+        <input id="coordY" type="number" step="1" value="0" style="width:100px" placeholder="y"/>
+        <button id="goToBtn" title="center to coords">go</button>
+        <span class="hint">type coords & press go</span>
+      </div>
+
+      <div class="group">
+        <button id="undoBtn" title="undo your last">⤺ undo</button>
+        <button id="redoBtn" title="redo your last">⤻ redo</button>
+      </div>
+
+      <span class="spacer"></span>
+      <div class="motto-ticker">❤ love makes the world go around ❤</div>
+      <span class="spacer"></span>
+
+      <div class="group">
+        <span>name</span>
+        <input id="username" type="text" maxlength="24" placeholder="anon" style="width:140px;"/>
+        <button id="settingsBtn" title="settings">⚙️</button>
+      </div>
+    </div>
+
+    <div class="world-wrap" id="wrap">
+      <!-- big canvas (acts like an infinite map) -->
+      <canvas id="world" width="12000" height="12000"></canvas>
+      <div class="crosshair"></div>
+      <div class="coords" id="coords">(0,0) · zoom 1.00</div>
+    </div>
+
+    <aside class="chat">
+      <header>
+        <strong>chatroom</strong>
+        <div class="notice" style="margin-left:auto">be nice pls • type <code>/help</code> for commands</div>
+      </header>
+      <div class="chat-log" id="chatLog"></div>
+      <form id="chatForm">
+        <input id="chatInput" type="text" maxlength="300" placeholder="say something or type /help"/>
+        <button type="submit">send</button>
+      </form>
+    </aside>
+  </div>
+
+  <div id="toast" class="toast" style="display:none"></div>
+
+  <!-- SETTINGS MODAL -->
+  <div class="modal" id="settingsModal" aria-hidden="true">
+    <div class="sheet">
+      <h3>Settings</h3>
+      <div class="row">
+        <label>name
+          <input id="setName" type="text" maxlength="24"/>
+        </label>
+        <label>pronouns
+          <input id="setPronouns" type="text" maxlength="24" placeholder="optional"/>
+        </label>
+      </div>
+      <div class="row">
+        <label>text color
+          <input id="setTextColor" type="color"/>
+        </label>
+        <label>username color
+          <input id="setNameColor" type="color"/>
+        </label>
+      </div>
+      <footer>
+        <button class="btn-secondary" id="settingsClose">Cancel</button>
+        <button class="btn-primary" id="settingsSave">Save</button>
+      </footer>
+    </div>
+  </div>
+
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+
+  <script>
+  // ===== FIREBASE =====
+  const firebaseConfig = {
+    apiKey: "AIzaSyCEVzLgCQT-H8aRUx6FaguxNjk61jbUmjg",
+    authDomain: "testingshiznit.firebaseapp.com",
+    projectId: "testingshiznit",
+    storageBucket: "testingshiznit.appspot.com",
+    messagingSenderId: "816600186917",
+    appId: "1:816600186917:web:b3f01f9ef3b8d453757fcc",
+    measurementId: "G-532XRPRTD5"
+  };
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.firestore();
+  const auth = firebase.auth();
+
+  // Promise that resolves once we have a user (anon or otherwise)
+  function waitForAuthUser() {
+    return new Promise((resolve, reject) => {
+      const off = auth.onAuthStateChanged(async (u) => {
+        try {
+          if (u) { off(); resolve(u); }
+          else {
+            await auth.signInAnonymously();
+          }
+        } catch (e) {
+          off();
+          reject(e);
+        }
+      }, reject);
+    });
+  }
+
+  // ===== PREFS (local) =====
+  const PREF_KEY = 'sb_prefs_v1';
+  function loadPrefs(){
+    try { return JSON.parse(localStorage.getItem(PREF_KEY)) || {}; } catch { return {}; }
+  }
+  function savePrefs(p){ localStorage.setItem(PREF_KEY, JSON.stringify(p||{})); }
+  function sanitizeName(s){
+    s = (s||'').trim().slice(0,24);
+    // allow letters, numbers, spaces, underscore, dash
+    s = s.replace(/[^\w \-]/g,'');
+    return s;
+  }
+
+  // ===== INTRO LOGIC =====
+  const overlay = document.getElementById("overlay");
+  const agree = document.getElementById("agree");
+  const rulesBox = document.getElementById("rulesBox");
+  const enterBtn = document.getElementById("enterBtn");
+  const mainApp = document.getElementById("mainApp");
+
+  const setupName = document.getElementById('setupName');
+  const setupPronouns = document.getElementById('setupPronouns');
+  const setupTextColor = document.getElementById('setupTextColor');
+  const setupNameColor = document.getElementById('setupNameColor');
+
+  enterBtn.disabled = true;
+  agree.addEventListener('change', ()=>{
+    enterBtn.classList.toggle('ready', agree.checked);
+    enterBtn.disabled = !agree.checked;
+  });
+
+  enterBtn.addEventListener("click", async () => {
+    const prefs = loadPrefs();
+    prefs.name = sanitizeName(setupName.value);
+    prefs.pronouns = (setupPronouns.value||'').trim().slice(0,24);
+    prefs.textColor = setupTextColor.value || '#e6ecff';
+    prefs.nameColor = setupNameColor.value || '#7c9cff';
+    savePrefs(prefs);
+
+    overlay.classList.add("hidden");
+    try {
+      await waitForAuthUser();
+    } catch (e) {
+      console.error("Auth failed:", e);
+      showToast("auth failed — check console & Firebase config");
+      return;
+    }
+    overlay.style.display="none";
+    mainApp.style.display="grid";
+    initAppAfterAuth();
+  });
+
+  // Auto-skip overlay if we already have prefs & agreed previously
+  (function bootstrap(){
+    const prefs = loadPrefs();
+    if (prefs && (prefs.textColor || prefs.name || prefs.nameColor)) {
+      // pretend they agreed previously
+      overlay.classList.add('hidden');
+      waitForAuthUser().then(()=>{ overlay.style.display='none'; mainApp.style.display='grid'; initAppAfterAuth();}).catch(e=>{console.error(e); showToast('auth failed');});
+    }
+  })();
+
+  // ===== CANVAS / UI VARS =====
+  const canvas = document.getElementById("world");
+  const ctx = canvas.getContext("2d");
+  const wrap = document.getElementById("wrap");
+  const coordsEl = document.getElementById("coords");
+  const colorEl = document.getElementById("color");
+  const sizeEl = document.getElementById("size");
+  const alphaEl = document.getElementById("alpha");
+  const usernameEl = document.getElementById("username");
+  const toastEl = document.getElementById("toast");
+  const coordXEl = document.getElementById("coordX");
+  const coordYEl = document.getElementById("coordY");
+
+  const settingsBtn = document.getElementById('settingsBtn');
+  const settingsModal = document.getElementById('settingsModal');
+  const settingsClose = document.getElementById('settingsClose');
+  const settingsSave = document.getElementById('settingsSave');
+  const setName = document.getElementById('setName');
+  const setPronouns = document.getElementById('setPronouns');
+  const setTextColor = document.getElementById('setTextColor');
+  const setNameColor = document.getElementById('setNameColor');
+
+  let scale = 1; // fixed scale; no zoom
+  let originX = 0, originY = 0;
+
+  function updateTransform() {
+    canvas.style.transform = `translate(${wrap.clientWidth/2 + originX}px, ${wrap.clientHeight/2 + originY}px) scale(${scale})`;
+    coordsEl.textContent = `(${Math.round(-originX/scale)}, ${Math.round(-originY/scale)}) · zoom ${scale.toFixed(2)}`;
+  }
+  function showToast(msg) { toastEl.textContent = msg; toastEl.style.display = "block"; setTimeout(() => toastEl.style.display = "none", 2000); }
+
+  // Grid bg
+  function drawGrid() {
+    ctx.fillStyle = "#fff"; ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.save();
+    ctx.strokeStyle = "#e9ecf5"; ctx.lineWidth = 1;
+    const step = 100;
+    ctx.beginPath();
+    for(let x=0; x<=canvas.width; x+=step){ ctx.moveTo(x,0); ctx.lineTo(x,canvas.height); }
+    for(let y=0; y<=canvas.height; y+=step){ ctx.moveTo(0,y); ctx.lineTo(canvas.width,y); }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawStroke(data){
+    if(!data.points || data.points.length < 2) return;
+    ctx.save();
+    ctx.globalAlpha = typeof data.a === 'number' ? data.a : 1;
+    ctx.strokeStyle = data.c || '#000';
+    ctx.lineWidth = data.s || 4;
+    ctx.lineJoin = "round"; ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(data.points[0].x, data.points[0].y);
+    for(let i=1;i<data.points.length;i++) ctx.lineTo(data.points[i].x, data.points[i].y);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function escapeHtml(s){
+    return (s||"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",
+      ">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+  }
+
+  // ===== APP INIT AFTER AUTH =====
+  async function initAppAfterAuth(){
+    // load prefs
+    const prefs = loadPrefs();
+    usernameEl.value = sanitizeName(prefs.name||'');
+    colorEl.value = prefs.nameColor || '#7c9cff';
+    // brush color left as tool color; text color stored separately
+
+    // position UI
+    updateTransform();
+    drawGrid();
+
+    // Center to coords button
+    document.getElementById("goToBtn").onclick = () => {
+      const x = parseInt(coordXEl.value || "0", 10);
+      const y = parseInt(coordYEl.value || "0", 10);
+      originX = -x * scale;
+      originY = -y * scale;
+      updateTransform();
+    };
+
+    // ===== DRAWING =====
+    let drawing = false; let currentStroke = []; let myStrokeIds = []; let redoIds = [];
+
+    function screenToWorld(x, y){
+      const rect = wrap.getBoundingClientRect();
+      const sx = x - rect.left - rect.width/2 - originX;
+      const sy = y - rect.top - rect.height/2 - originY;
+      return {x: Math.round(sx/scale), y: Math.round(sy/scale)};
+    }
+
+    wrap.addEventListener("mousedown", e => {
+      if (e.button === 0 && e.target === canvas) {
+        drawing = true; currentStroke = []; redoIds.length = 0;
+        currentStroke.push(screenToWorld(e.clientX, e.clientY));
+      }
+    });
+
+    window.addEventListener("mouseup", async e => {
+      if(drawing) {
+        drawing = false;
+        if(currentStroke.length >= 2) {
+          const stroke = {
+            points: currentStroke,
+            c: colorEl.value,
+            s: parseInt(sizeEl.value),
+            a: parseFloat(alphaEl.value),
+            by: (usernameEl.value||"anon").slice(0,24),
+            uid: (auth.currentUser && auth.currentUser.uid) || null,
+            revoked: false,
+            ts: firebase.firestore.FieldValue.serverTimestamp()
+          };
+          try {
+            const ref = await db.collection("strokes").add(stroke);
+            myStrokeIds.push(ref.id);
+          } catch(err){
+            console.error("save stroke error:", err);
+            if (err && err.code === "permission-denied") {
+              showToast("blocked by rules: set Firestore rules for anon");
+            } else {
+              showToast("error saving stroke");
+            }
+          }
+        }
+      }
+    });
+
+    window.addEventListener("mousemove", e => {
+      if(drawing) {
+        const pt = screenToWorld(e.clientX, e.clientY);
+        currentStroke.push(pt);
+        // live preview
+        drawStroke({points: currentStroke, c: colorEl.value, s: parseInt(sizeEl.value), a: parseFloat(alphaEl.value)});
+      }
+    });
+
+    // Undo / Redo (per-user via revoked toggle)
+    async function undo() {
+      for (let i = myStrokeIds.length - 1; i >= 0; i--) {
+        const id = myStrokeIds[i];
+        try {
+          const docRef = db.collection("strokes").doc(id);
+          const snap = await docRef.get();
+          const d = snap.data();
+          if (d && !d.revoked && d.uid === (auth.currentUser && auth.currentUser.uid)) {
+            await docRef.update({revoked:true, tsUndo: firebase.firestore.FieldValue.serverTimestamp()});
+            redoIds.push(id);
+            break;
+          }
+        } catch (e) { console.error(e); showToast("undo failed"); break; }
+      }
+    }
+    async function redo() {
+      while (redoIds.length) {
+        const id = redoIds.pop();
+        try {
+          const docRef = db.collection("strokes").doc(id);
+          const snap = await docRef.get();
+          const d = snap.data();
+          if (d && d.revoked && d.uid === (auth.currentUser && auth.currentUser.uid)) {
+            await docRef.update({revoked:false, tsRedo: firebase.firestore.FieldValue.serverTimestamp()});
+            break;
+          }
+        } catch (e) { console.error(e); showToast("redo failed"); break; }
+      }
+    }
+    document.getElementById("undoBtn").onclick = undo;
+    document.getElementById("redoBtn").onclick = redo;
+
+    // ===== FIRESTORE SYNC =====
+    db.collection("strokes").orderBy("ts","asc").onSnapshot(snap=>{
+      drawGrid();
+      snap.forEach(doc=>{ const d = doc.data(); if (!d.revoked) drawStroke(d); });
+    }, err=>{
+      console.error("strokes listener error:", err);
+      showToast("can't load canvas (check console)");
+    });
+
+    // ===== CHAT =====
+    const chatLog = document.getElementById("chatLog");
+    const chatForm = document.getElementById("chatForm");
+    const chatInput = document.getElementById("chatInput");
+
+    function addChatMsgElem(m){
+      const div = document.createElement("div"); div.className = "chat-msg";
+      const name = (m.by||"anon");
+      const time = m.ts?.toDate ? m.ts.toDate().toLocaleTimeString() : "";
+      const pronouns = m.pr || '';
+      const nameColor = m.nc || '#7c9cff';
+      const textColor = m.tc || '#e6ecff';
+      const header = `<small><span style="color:${nameColor}; font-weight:600;">${escapeHtml(name)}</span>${pronouns?` <span class='minor'>(${escapeHtml(pronouns)})</span>`:''}${time ? " · " + escapeHtml(time) : ""}</small>`;
+      const body = `<div style="color:${textColor}">${escapeHtml(m.text||"")}</div>`;
+      div.innerHTML = header + body;
+      chatLog.appendChild(div);
+    }
+
+    let chatCache = [];
+    function renderChat(){
+      chatLog.innerHTML = "";
+      chatCache.forEach(addChatMsgElem);
+      chatLog.scrollTop = chatLog.scrollHeight;
+    }
+
+    function prefsOrDefaults(){
+      const p = loadPrefs();
+      return {
+        name: sanitizeName(usernameEl.value || p.name || ''),
+        pronouns: (p.pronouns||'').slice(0,24),
+        textColor: p.textColor || '#e6ecff',
+        nameColor: p.nameColor || '#7c9cff'
+      };
+    }
+
+    // chat commands
+    function handleCommand(raw){
+      const [cmd, ...rest] = raw.slice(1).split(/\s+/);
+      const argline = rest.join(' ');
+      const prefs = loadPrefs();
+      switch(cmd.toLowerCase()){
+        case 'help':
+          systemMsg("commands: /me <action>, /nick <name>, /pronouns <text>, /color <#hex>, /namecolor <#hex>, /roll [NdM], /shrug, /flip, /clear, /coords, /goto <x> <y>");
+          return true;
+        case 'me':
+          sendChat({text: `* ${argline}` , em:true}); return true;
+        case 'nick': {
+          const newName = sanitizeName(argline);
+          usernameEl.value = newName;
+          prefs.name = newName; savePrefs(prefs);
+          systemMsg(`name set to ${newName || 'anon'}`); return true;
+        }
+        case 'pronouns': {
+          prefs.pronouns = (argline||'').slice(0,24); savePrefs(prefs);
+          systemMsg(`pronouns set to ${prefs.pronouns||'—'}`); return true;
+        }
+        case 'color': {
+          if(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(argline)){ prefs.textColor = argline; savePrefs(prefs); systemMsg(`text color set to ${argline}`);} else systemMsg('usage: /color #hex');
+          return true;
+        }
+        case 'namecolor': {
+          if(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(argline)){ prefs.nameColor = argline; savePrefs(prefs); colorEl.value = argline; systemMsg(`username color set to ${argline}`);} else systemMsg('usage: /namecolor #hex');
+          return true;
+        }
+        case 'roll': {
+          let m = argline.match(/(\d+)?d(\d+)/i); let n=1, sides=6;
+          if(m){ n = Math.max(1, Math.min(50, parseInt(m[1]||'1',10))); sides = Math.max(2, Math.min(1000, parseInt(m[2],10))); }
+          const rolls = Array.from({length:n}, ()=> 1 + Math.floor(Math.random()*sides));
+          systemMsg(`🎲 rolled ${n}d${sides}: [${rolls.join(', ')}] = ${rolls.reduce((a,b)=>a+b,0)}`);
+          return true;
+        }
+        case 'shrug': sendChat({text: '¯\\_(ツ)_/¯'}); return true;
+        case 'flip': sendChat({text: '(╯°□°）╯︵ ┻━┻'}); return true;
+        case 'clear': chatCache = []; renderChat(); return true;
+        case 'coords': systemMsg(`you are at (${Math.round(-originX/scale)}, ${Math.round(-originY/scale)})`); return true;
+        case 'goto': {
+          const parts = argline.trim().split(/\s+/); if(parts.length>=2){
+            const x = parseInt(parts[0],10), y=parseInt(parts[1],10);
+            if(!Number.isNaN(x)&&!Number.isNaN(y)){
+              coordXEl.value = x; coordYEl.value = y; document.getElementById('goToBtn').click(); systemMsg(`centered to (${x}, ${y})`);
+            }
+          } else systemMsg('usage: /goto <x> <y>');
+          return true;
+        }
+      }
+      return false;
+    }
+
+    function systemMsg(text){
+      chatCache.push({by:'system', text, tc:'#e6ecff', nc:'#b0b7c9', ts:{toDate:()=>new Date()}});
+      renderChat();
+    }
+
+    async function sendChat(opts){
+      const p = prefsOrDefaults();
+      const payload = {
+        text: (opts?.text||'').slice(0,300),
+        by: (p.name||"anon").slice(0,24),
+        pr: (p.pronouns||'').slice(0,24),
+        tc: p.textColor,
+        nc: p.nameColor,
+        uid: (auth.currentUser&&auth.currentUser.uid)||null,
+        ts: firebase.firestore.FieldValue.serverTimestamp()
+      };
+      try{ await db.collection("chat").add(payload); }
+      catch(err){
+        console.error("chat send error:", err);
+        if (err && err.code === "permission-denied") showToast("blocked by rules: set Firestore rules for anon");
+        else showToast(err.code || "error sending");
+      }
+    }
+
+    chatForm.addEventListener("submit", async e=>{
+      e.preventDefault();
+      const raw = (chatInput.value||"").trim();
+      if(!raw) return;
+      chatInput.value = "";
+      if(raw.startsWith('/')) { if(handleCommand(raw)) return; }
+      await sendChat({text: raw});
+    });
+
+    db.collection("chat").orderBy("ts","asc").limitToLast(400).onSnapshot(snap=>{
+      chatCache = []; snap.forEach(doc=> chatCache.push(doc.data())); renderChat();
+    }, err=>{
+      console.error("chat listener error:", err);
+      showToast("can't load chat");
+    });
+
+    // ===== SETTINGS POPUP =====
+    function openSettings(){
+      const p = loadPrefs();
+      setName.value = sanitizeName(usernameEl.value || p.name || '');
+      setPronouns.value = (p.pronouns||'');
+      setTextColor.value = p.textColor || '#e6ecff';
+      setNameColor.value = p.nameColor || '#7c9cff';
+      settingsModal.classList.add('active');
+    }
+    function closeSettings(){ settingsModal.classList.remove('active'); }
+    settingsBtn.addEventListener('click', openSettings);
+    settingsClose.addEventListener('click', closeSettings);
+
+    settingsSave.addEventListener('click', ()=>{
+      const p = loadPrefs();
+      p.name = sanitizeName(setName.value);
+      p.pronouns = (setPronouns.value||'').trim().slice(0,24);
+      p.textColor = setTextColor.value || '#e6ecff';
+      p.nameColor = setNameColor.value || '#7c9cff';
+      savePrefs(p);
+      usernameEl.value = p.name;
+      colorEl.value = p.nameColor; // keep tool in sync with username color vibe
+      closeSettings();
+      showToast('settings saved');
+    });
+  }
+  </script>
+</body>
+</html>
